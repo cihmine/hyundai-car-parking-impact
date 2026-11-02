@@ -115,6 +115,16 @@ class ParkingMonitor(
         }
     }
 
+    /** JSON 해석부터 실패한 입력도 이유를 남긴다(정상 이벤트로 저장하지 않음). */
+    fun recordInvalid(label: String, reason: String, nowMs: Long) {
+        ignore(label, nowMs, reason, ReceiveResult.Rejected(reason))
+    }
+
+    /** 저장에 실패했을 때 바꾸기 전 상태로 되돌린다(화면·디스크·메모리를 어긋나지 않게). */
+    fun rollback(previous: MonitorState) {
+        state = previous
+    }
+
     private fun <T : ReceiveResult> ignore(eventId: String, nowMs: Long, reason: String, result: T): T {
         state = state.copy(ignored = (state.ignored + IgnoredInput(eventId, nowMs, reason)).takeLast(MAX_IGNORED))
         return result
@@ -134,11 +144,21 @@ class ParkingMonitor(
             state = state.copy(notice = null)
             return null
         }
-        val latest = pending.maxBy { it.occurredAt }
         val ids = pending.map { it.id }
-        state = state.copy(notice = NoticeState(session?.id ?: state.notice?.sessionId ?: "-", ids))
-        return ReturnSummary(pending.size, latest, ids)
+        // 새 주차 없이 재탑승을 다시 처리하면(같은 미확인 목록) 닫은 알림을 다시 만들지 않는다.
+        val prev = state.notice
+        if (session == null && prev != null && prev.recordIds.toSet() == ids.toSet()) {
+            return if (prev.dismissed) null else summaryOf(pending)
+        }
+        state = state.copy(notice = NoticeState(session?.id ?: prev?.sessionId ?: "-", ids))
+        return summaryOf(pending)
     }
+
+    /** 지금 미확인 기록 요약(화면이 저장 상태에서 다시 계산할 때도 쓴다). 없으면 null */
+    fun currentSummary(): ReturnSummary? = state.unreviewed.takeIf { it.isNotEmpty() }?.let(::summaryOf)
+
+    private fun summaryOf(pending: List<ImpactRecord>) =
+        ReturnSummary(pending.size, pending.maxBy { occurredMs(it) }, pending.map { it.id })
 
     /** 요약 알림 닫기. 기록과 미확인 상태는 그대로 남는다. */
     fun dismissNotice() {
@@ -186,3 +206,6 @@ object MonitorCodec {
     fun encode(state: MonitorState): String = ImpactJson.json.encodeToString(MonitorState.serializer(), state)
     fun decode(text: String): MonitorState = ImpactJson.json.decodeFromString(MonitorState.serializer(), text)
 }
+
+/** 발생 시각(ms). 문자열 비교는 소수점 유무에 따라 순서가 뒤바뀌므로 시각으로 바꿔 비교한다. */
+fun occurredMs(r: ImpactRecord): Long = runCatching { java.time.Instant.parse(r.occurredAt).toEpochMilli() }.getOrDefault(r.receivedAtMs)

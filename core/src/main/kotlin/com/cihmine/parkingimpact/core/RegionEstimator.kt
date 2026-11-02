@@ -41,11 +41,7 @@ class RegionEstimator(private val config: EstimatorConfig = EstimatorConfig.DEMO
         validate(event)?.let { return EstimationResult.Rejected(it) }
 
         val peaks: Map<VirtualChannel, Double> = event.samples.associate { VirtualChannel.byId(it.channelId)!! to it.normalizedPeak }
-        val maxPeak = peaks.values.maxOrNull() ?: 0.0
-        if (maxPeak < config.noEventThreshold) {
-            return EstimationResult.NoEvent("모든 채널 신호가 기록 기준(${config.noEventThreshold})보다 작음")
-        }
-
+        // 채널이 빠졌으면 나머지가 약해도 "충격 없음"이라고 단정하지 않는다.
         val missing = VirtualChannel.entries - peaks.keys
         if (missing.isNotEmpty()) {
             return EstimationResult.Detected(
@@ -55,6 +51,11 @@ class RegionEstimator(private val config: EstimatorConfig = EstimatorConfig.DEMO
                     candidates = emptyList(),
                 ),
             )
+        }
+
+        val maxPeak = peaks.values.max()
+        if (maxPeak <= 0.0 || maxPeak < config.noEventThreshold) {
+            return EstimationResult.NoEvent("모든 채널 신호가 기록 기준(${config.noEventThreshold})보다 작음")
         }
 
         val scores = Region.entries.filter { it != Region.UNKNOWN }.associateWith { score(it, peaks) }
@@ -74,9 +75,10 @@ class RegionEstimator(private val config: EstimatorConfig = EstimatorConfig.DEMO
             )
         }
         val evidence = if (margin >= config.sufficientMargin) Evidence.SUFFICIENT else Evidence.LIMITED
-        val gap = (margin * 100).toInt()
+        // 판단 기준은 1위 대비 차이(margin)지만, 안내는 읽기 쉬운 "2위보다 몇 % 높음"(2위 대비 증가율)으로 쓴다.
+        val detail = if (secondScore <= 0.0) "다른 구역 신호 없음" else "다음 구역보다 점수가 ${((topScore / secondScore - 1) * 100).toInt()}% 높음"
         return EstimationResult.Detected(
-            Estimate(top, evidence, "${top.label} 채널 신호가 가장 큼(다음 구역보다 ${gap}% 높음)", scores),
+            Estimate(top, evidence, "${top.label} 채널 신호가 가장 큼($detail)", scores),
         )
     }
 

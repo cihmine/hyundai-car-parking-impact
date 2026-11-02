@@ -158,3 +158,70 @@ class ParkingMonitorTest {
         assertEquals(Region.FRONT_RIGHT, assertIs<EstimationResult.Detected>(est.estimate(moved)).estimate.region)
     }
 }
+
+/** 2026-11-02 codex 점검 지적 재현 */
+class ReviewRegressionTest {
+    private fun scenario(name: String): RawImpactEvent =
+        assertIs<ParsedEvent.Ok>(ImpactJson.parse(File("../demo/scenarios/$name.json").readText())).event
+
+    @Test
+    fun `같은 재탑승을 다시 눌러도 닫은 알림을 다시 만들지 않는다`() {
+        val m = ParkingMonitor().also { it.startParking(1_000) }
+        m.receive(scenario("01_front_left"), 2_000)
+        assertNotNull(m.returnToCar(3_000))
+        m.dismissNotice()
+        assertNull(m.returnToCar(4_000), "새 주차 없이 다시 재탑승하면 알림 없음")
+        assertTrue(m.state.notice!!.dismissed)
+    }
+
+    @Test
+    fun `최신 사건은 문자열이 아니라 시각으로 고른다`() {
+        val m = ParkingMonitor().also { it.startParking(1_000) }
+        val base = scenario("01_front_left")
+        m.receive(base.copy(eventId = "a", occurredAt = "2026-11-02T03:00:00.100Z"), 2_000)
+        m.receive(base.copy(eventId = "b", occurredAt = "2026-11-02T03:00:00Z"), 2_000)
+        assertEquals("a", m.returnToCar(3_000)!!.latest.rawEventIds.single())
+    }
+
+    @Test
+    fun `채널이 빠졌으면 약한 신호여도 충격 없음이 아니라 정보 부족`() {
+        val base = scenario("01_front_left")
+        val r = RegionEstimator().estimate(base.copy(samples = listOf(ImpactSample("front_left_virtual", 0, 0.1))))
+        assertEquals(Region.UNKNOWN, assertIs<EstimationResult.Detected>(r).estimate.region)
+    }
+
+    @Test
+    fun `점수가 모두 0이면 특정 구역을 고르지 않는다`() {
+        val base = scenario("01_front_left")
+        val zero = base.copy(samples = base.samples.map { it.copy(normalizedPeak = 0.0) })
+        val r = RegionEstimator(EstimatorConfig(noEventThreshold = 0.0)).estimate(zero)
+        assertTrue(r !is EstimationResult.Detected || r.estimate.region == Region.UNKNOWN, "$r")
+    }
+
+    @Test
+    fun `점수 차이 문구는 2위 대비 증가율과 일치한다`() {
+        val e = assertIs<EstimationResult.Detected>(RegionEstimator().estimate(scenario("01_front_left"))).estimate
+        val top = e.scores.getValue(Region.FRONT_LEFT)
+        val second = e.scores.getValue(Region.FRONT_RIGHT)
+        val pct = ((top / second - 1) * 100).toInt()
+        assertTrue(e.reason.contains("$pct%"), e.reason)
+    }
+
+    @Test
+    fun `형식이 틀린 JSON 도 이유를 기록한다`() {
+        val m = ParkingMonitor().also { it.startParking(1_000) }
+        m.recordInvalid("demo-x", "형식 오류: 필수 필드 없음", 2_000)
+        assertEquals("형식 오류: 필수 필드 없음", m.state.ignored.last().reason)
+    }
+
+    @Test
+    fun `저장 실패 시 되돌릴 수 있다`() {
+        val m = ParkingMonitor().also { it.startParking(1_000) }
+        val r = assertIs<ReceiveResult.Recorded>(m.receive(scenario("01_front_left"), 2_000)).record
+        val before = m.state
+        m.delete(r.id)
+        m.rollback(before)
+        assertEquals(1, m.state.records.size)
+        assertTrue(m.delete(r.id), "되돌린 뒤 같은 삭제를 다시 할 수 있다")
+    }
+}

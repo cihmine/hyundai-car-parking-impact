@@ -8,7 +8,6 @@ import com.cihmine.parkingimpact.core.MonitorState
 import com.cihmine.parkingimpact.core.ParkingMonitor
 import com.cihmine.parkingimpact.core.ParsedEvent
 import com.cihmine.parkingimpact.core.ReceiveResult
-import com.cihmine.parkingimpact.core.ReturnSummary
 import com.cihmine.parkingimpact.core.Texts
 import com.cihmine.parkingimpact.data.FileMonitorStore
 import com.cihmine.parkingimpact.speech.Voice
@@ -34,7 +33,6 @@ data class ParkingUi(
     val screen: Screen = Screen.Home,
     val vehicle: VehicleState = VehicleState.PARKED,
     val input: InputState = InputState.SIMULATED_CONNECTED,
-    val summary: ReturnSummary? = null,
     /** 마지막 입력 처리 결과(시연 패널 표시) */
     val lastResult: String? = null,
     val ttsReady: Boolean = false,
@@ -60,7 +58,7 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
     private val tts = Voice.output(app) { ok -> _ui.update { it.copy(ttsReady = ok) } }
 
     init {
-        _ui.update { it.copy(ttsEngine = tts.engineName) }
+        _ui.update { it.copy(ttsEngine = tts.engineName, lastResult = store.backedUp?.let { f -> "저장 파일을 읽지 못해 새로 시작했어요(백업: ${f.name})" }) }
     }
 
     private fun now() = System.currentTimeMillis()
@@ -73,31 +71,44 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
         }
     }.getOrElse { Log.w(TAG, "시나리오를 읽지 못함", it); emptyList() }
 
-    /** 상태를 저장하고 화면에 반영한다. 저장이 실패하면 화면도 바꾸지 않고 알린다. */
-    private fun commit(message: String? = null, change: ParkingUi.() -> ParkingUi = { this }) {
+    /**
+     * [action] 으로 상태를 바꾸고 저장한 뒤 화면에 반영한다. 저장이 실패하면 바꾸기 전 상태로 되돌리고
+     * 화면·음성도 바꾸지 않는다(메모리·디스크·화면이 어긋나지 않게). 성공하면 true.
+     */
+    private fun <T> transact(action: () -> T, onSaved: (T) -> Unit): Boolean {
+        val before = monitor.state
+        val result = action()
+        if (monitor.state == before) { onSaved(result); return true }
         runCatching { store.save(monitor.state) }.onFailure {
             Log.e(TAG, "저장 실패", it)
-            _ui.update { u -> u.copy(lastResult = "저장 실패 — 기록이 남지 않았을 수 있어요") }
-            return
+            monitor.rollback(before)
+            _ui.update { u -> u.copy(monitor = monitor.state, lastResult = "저장 실패 — 바뀐 내용을 되돌렸어요. 다시 시도해 주세요") }
+            return false
         }
-        _ui.update { it.copy(monitor = monitor.state, lastResult = message ?: it.lastResult).change() }
+        _ui.update { it.copy(monitor = monitor.state) }
+        onSaved(result)
+        return true
     }
+
+    private fun show(message: String?, change: ParkingUi.() -> ParkingUi = { this }) =
+        _ui.update { it.copy(lastResult = message ?: it.lastResult).change() }
 
     // ── 주차·재탑승 ─────────────────────────────────────────
 
     fun startParking() {
-        monitor.startParking(now())
-        _ui.update { it.copy(vehicle = VehicleState.PARKED) }
-        commit("주차를 시작했어요")
+        transact({ monitor.startParking(now()) }) {
+            show("주차를 시작했어요") { copy(vehicle = VehicleState.PARKED) }
+        }
     }
 
-    /** 모의 재탑승. 미확인 기록이 있을 때만 요약 화면·음성 안내를 낸다. */
+    /** 모의 재탑승. 미확인 기록이 있을 때만(저장에 성공한 뒤) 요약 화면·음성 안내를 낸다. */
     fun returnToCar() {
-        val summary = monitor.returnToCar(now())
-        commit(if (summary == null) "재탑승 — 확인할 기록 없음" else "재탑승 — 미확인 ${summary.count}건") {
-            copy(summary = summary, screen = if (summary != null) Screen.Summary else Screen.Home)
+        transact({ monitor.returnToCar(now()) }) { summary ->
+            show(if (summary == null) "재탑승 — 새로 알릴 기록 없음" else "재탑승 — 미확인 ${summary.count}건") {
+                copy(screen = if (summary != null) Screen.Summary else Screen.Home)
+            }
+            if (summary != null && _ui.value.ttsReady) tts.speak(Texts.summarySpeech(summary, zone), 100) {}
         }
-        if (summary != null && _ui.value.ttsReady) tts.speak(Texts.summarySpeech(summary, zone), 100) {}
     }
 
     fun setVehicle(state: VehicleState) {
@@ -118,24 +129,29 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
         val event = when (val p = ImpactJson.parse(scenario.text)) {
             // 시연에서는 지금 일어난 충격처럼 발생 시각을 주입 시각으로 바꾼다(eventId 는 그대로라 중복 차단은 같다).
             is ParsedEvent.Ok -> p.event.copy(occurredAt = java.time.Instant.ofEpochMilli(now()).toString())
-            is ParsedEvent.Invalid -> return _ui.update { it.copy(lastResult = "저장 안 함: ${p.reason}") }
+            is ParsedEvent.Invalid -> {
+                transact({ monitor.recordInvalid(scenario.file, p.reason, now()) }) { show("저장 안 함: ${p.reason}") }
+                return
+            }
         }
-        val message = when (val r = monitor.receive(event, now())) {
-            is ReceiveResult.Recorded -> "기록함: ${Texts.regionPhrase(r.record.estimate)} · ${r.record.estimate.evidence.label}"
-            is ReceiveResult.Duplicate -> "이미 받은 이벤트 — 새 기록을 만들지 않음"
-            is ReceiveResult.NoEvent -> "기록할 충격 없음: ${r.reason}"
-            is ReceiveResult.Rejected -> "저장 안 함: ${r.reason}"
-            ReceiveResult.NoSession -> "주차 중이 아니어서 기록하지 않음"
+        transact({ monitor.receive(event, now()) }) { r ->
+            show(
+                when (r) {
+                    is ReceiveResult.Recorded -> "기록함: ${Texts.regionPhrase(r.record.estimate)} · ${r.record.estimate.evidence.label}"
+                    is ReceiveResult.Duplicate -> "이미 받은 이벤트 — 새 기록을 만들지 않음"
+                    is ReceiveResult.NoEvent -> "기록할 충격 없음: ${r.reason}"
+                    is ReceiveResult.Rejected -> "저장 안 함: ${r.reason}"
+                    ReceiveResult.NoSession -> "주차 중이 아니어서 기록하지 않음"
+                },
+            )
         }
-        commit(message)
     }
 
     // ── 확인·삭제 ───────────────────────────────────────────
 
     fun dismissSummary() {
         tts.stop()
-        monitor.dismissNotice()
-        commit { copy(screen = Screen.Home, summary = null) }
+        transact({ monitor.dismissNotice() }) { show(null) { copy(screen = Screen.Home) } }
     }
 
     fun open(screen: Screen) {
@@ -145,12 +161,12 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
 
     fun acknowledge(recordId: String, note: String) {
         if (!_ui.value.detailAllowed) return
-        if (monitor.acknowledge(recordId, note, now())) commit("확인 완료로 바꿨어요")
+        transact({ monitor.acknowledge(recordId, note, now()) }) { ok -> if (ok) show("확인 완료로 바꿨어요") }
     }
 
     fun delete(recordId: String) {
         if (!_ui.value.detailAllowed) return
-        if (monitor.delete(recordId)) commit("기록을 삭제했어요") { copy(screen = Screen.Records) }
+        transact({ monitor.delete(recordId) }) { ok -> if (ok) show("기록을 삭제했어요") { copy(screen = Screen.Records) } }
     }
 
     fun time(iso: String) = Texts.time(iso, zone)

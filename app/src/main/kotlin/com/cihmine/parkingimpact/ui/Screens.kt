@@ -44,6 +44,8 @@ import com.cihmine.parkingimpact.core.ImpactRecord
 import com.cihmine.parkingimpact.core.RecordStatus
 import com.cihmine.parkingimpact.core.Region
 import com.cihmine.parkingimpact.core.Texts
+import com.cihmine.parkingimpact.core.occurredMs
+import com.cihmine.parkingimpact.core.ParkingMonitor
 import com.cihmine.parkingimpact.vehicle.InputState
 import com.cihmine.parkingimpact.vehicle.VehicleState
 
@@ -109,9 +111,8 @@ private fun Home(ui: ParkingUi, c: ParkingController) {
 
 @Composable
 private fun Summary(ui: ParkingUi, c: ParkingController) {
-    val s = ui.summary ?: ui.monitor.unreviewed.takeIf { it.isNotEmpty() }?.let { list ->
-        com.cihmine.parkingimpact.core.ReturnSummary(list.size, list.maxBy { it.occurredAt }, list.map { it.id })
-    }
+    // 확인·삭제 뒤에도 맞도록 저장 상태에서 매번 다시 계산한다.
+    val s = ParkingMonitor(ui.monitor).currentSummary()
     if (s == null) return Text("확인할 기록이 없어요.", fontSize = 22.sp)
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("주차 중 충격 의심 기록 ${s.count}건이 있어요", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Highlight)
@@ -140,7 +141,7 @@ private fun Records(ui: ParkingUi, c: ParkingController) {
             OutlinedButton(onClick = { c.open(Screen.Home) }) { Text("처음 화면") }
         }
         if (!ui.detailAllowed) Text("주행 중에는 상세 확인을 할 수 없어요.", color = Highlight, fontSize = 17.sp)
-        val list = ui.monitor.records.sortedByDescending { it.occurredAt }
+        val list = ui.monitor.records.sortedByDescending { occurredMs(it) }
         if (list.isEmpty()) Text("기록이 없어요.", fontSize = 18.sp)
         list.forEach { r -> RecordRow(r, c, enabled = ui.detailAllowed) }
     }
