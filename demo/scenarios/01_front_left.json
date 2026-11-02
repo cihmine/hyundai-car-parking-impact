@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "source": "SIMULATED",
+  "eventId": "demo-impact-001",
+  "occurredAt": "2026-11-01T03:00:00Z",
+  "description": "좌측 앞 채널 신호가 우세",
+  "samples": [
+    {"channelId": "front_left_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.85},
+    {"channelId": "front_right_virtual", "relativeTimeMs": 1, "normalizedPeak": 0.30},
+    {"channelId": "rear_left_virtual", "relativeTimeMs": 2, "normalizedPeak": 0.25},
+    {"channelId": "rear_right_virtual", "relativeTimeMs": 3, "normalizedPeak": 0.10}
+  ]
+}

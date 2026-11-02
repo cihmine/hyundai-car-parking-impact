@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "source": "SIMULATED",
+  "eventId": "demo-impact-004",
+  "occurredAt": "2026-11-01T05:40:00Z",
+  "description": "앞쪽 두 채널이 비슷함(구역 판단 어려움)",
+  "samples": [
+    {"channelId": "front_left_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.62},
+    {"channelId": "front_right_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.58},
+    {"channelId": "rear_left_virtual", "relativeTimeMs": 2, "normalizedPeak": 0.20},
+    {"channelId": "rear_right_virtual", "relativeTimeMs": 2, "normalizedPeak": 0.18}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "source": "SIMULATED",
+  "eventId": "demo-impact-006",
+  "occurredAt": "2026-11-01T06:30:00Z",
+  "description": "문 닫힘과 비슷한 짧은 흔들림(비교용 모의 이벤트)",
+  "samples": [
+    {"channelId": "front_left_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.33},
+    {"channelId": "front_right_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.31},
+    {"channelId": "rear_left_virtual", "relativeTimeMs": 1, "normalizedPeak": 0.29},
+    {"channelId": "rear_right_virtual", "relativeTimeMs": 1, "normalizedPeak": 0.30}
+  ]
+}

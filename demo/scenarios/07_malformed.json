@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "source": "SIMULATED",
+  "eventId": "demo-impact-007",
+  "occurredAt": "2026-11-01T07:00:00Z",
+  "description": "값 범위 오류(정상 이벤트로 저장하지 않음)",
+  "samples": [
+    {"channelId": "front_left_virtual", "relativeTimeMs": 0, "normalizedPeak": 1.7},
+    {"channelId": "front_right_virtual", "relativeTimeMs": 1, "normalizedPeak": 0.30},
+    {"channelId": "rear_left_virtual", "relativeTimeMs": 2, "normalizedPeak": 0.25},
+    {"channelId": "rear_right_virtual", "relativeTimeMs": 3, "normalizedPeak": 0.10}
+  ]
+}
