@@ -61,6 +61,14 @@ fun ParkingApp(c: ParkingController) {
             Text("차량 연동 시뮬레이션 · 충격 입력: 가상 센서 시나리오 · 차량 상태: 모의 ${ui.vehicle.label}", color = BannerText, fontSize = 15.sp)
             Spacer(Modifier.weight(1f))
             Text("음성 안내: ${ui.ttsEngine}${if (ui.ttsReady) "" else "(준비 안 됨)"}", color = BannerText, fontSize = 15.sp)
+            Spacer(Modifier.width(24.dp))
+            Text(
+                if (ui.demoPanel) "시연 패널 닫기 ▸" else "◂ 시연 패널",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(onClick = c::toggleDemoPanel),
+            )
         }
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight().padding(24.dp)) {
@@ -71,7 +79,7 @@ fun ParkingApp(c: ParkingController) {
                     is Screen.Detail -> Detail(ui, c, s.recordId)
                 }
             }
-            DemoPanel(ui, c)
+            if (ui.demoPanel) DemoPanel(ui, c)
         }
     } }
 }
@@ -80,7 +88,10 @@ fun ParkingApp(c: ParkingController) {
 private fun Home(ui: ParkingUi, c: ParkingController) {
     val m = ui.monitor
     val session = m.session
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    // 실제 사용자 화면: 왼쪽에 위에서 본 차량을 크게, 오른쪽에 상태
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
+    CarDiagram(highlight = null, counts = m.unreviewed.groupingBy { it.estimate.region }.eachCount(), width = 360.dp)
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("주차 충격 확인", fontSize = 34.sp, fontWeight = FontWeight.Bold)
         Text("주차 중 생긴 충격 의심 기록을 구역과 함께 남기고, 다시 탈 때 알려 드려요.", fontSize = 17.sp, color = Color.LightGray)
         val status = when {
@@ -95,17 +106,16 @@ private fun Home(ui: ParkingUi, c: ParkingController) {
                 Text("확인하지 않은 기록 ${m.unreviewed.size}건 · 전체 ${m.records.size}건", fontSize = 18.sp)
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            CarDiagram(highlight = null, counts = m.unreviewed.groupingBy { it.estimate.region }.eachCount(), width = 160.dp)
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { c.open(Screen.Records) }, Modifier.height(56.dp)) { Text("기록 보기", fontSize = 18.sp) }
-                if (m.notice != null && m.unreviewed.isNotEmpty()) {
-                    OutlinedButton(onClick = { c.open(Screen.Summary) }, Modifier.height(56.dp)) { Text("재탑승 요약 다시 보기", fontSize = 18.sp) }
-                }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = { c.open(Screen.Records) }, Modifier.height(56.dp)) { Text("기록 보기", fontSize = 18.sp) }
+            if (m.notice != null && m.unreviewed.isNotEmpty()) {
+                OutlinedButton(onClick = { c.open(Screen.Summary) }, Modifier.height(56.dp)) { Text("재탑승 요약 다시 보기", fontSize = 18.sp) }
             }
         }
         Text("이 시제품은 실제 차량에서 충격을 감지하지 않아요. 판정은 '충격 의심·구역 추정'이며 파손 여부나 책임을 판단하지 않아요.",
             fontSize = 14.sp, color = Color.Gray)
+        Text("체험은 오른쪽 위 '시연 패널'에서 주차 시작 → 시나리오 → 재탑승 순서로 해 보세요.", fontSize = 14.sp, color = Color.Gray)
+    }
     }
 }
 
@@ -122,6 +132,7 @@ private fun Summary(ui: ParkingUi, c: ParkingController) {
                 highlight = s.latest.estimate.region.takeIf { it != Region.UNKNOWN },
                 candidates = s.latest.estimate.candidates,
                 counts = ui.monitor.unreviewed.groupingBy { it.estimate.region }.eachCount(),
+                width = 300.dp,
             )
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (!ui.detailAllowed) Text("주행 중에는 상세 확인을 할 수 없어요. 차를 세운 뒤 확인해 주세요.", color = Highlight, fontSize = 17.sp)
@@ -175,7 +186,7 @@ private fun Detail(ui: ParkingUi, c: ParkingController, recordId: String) {
         }
         if (!ui.detailAllowed) return@Column Text("주행 중에는 상세 확인을 할 수 없어요. 차를 세운 뒤 확인해 주세요.", color = Highlight, fontSize = 20.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            CarDiagram(r.estimate.region.takeIf { it != Region.UNKNOWN }, r.estimate.candidates)
+            CarDiagram(r.estimate.region.takeIf { it != Region.UNKNOWN }, r.estimate.candidates, width = 300.dp)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("발생 시각: ${c.time(r.occurredAt)}", fontSize = 19.sp)
                 Text("확인 권장 구역: ${Texts.regionPhrase(r.estimate)}", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)

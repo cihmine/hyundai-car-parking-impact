@@ -38,6 +38,8 @@ data class ParkingUi(
     val ttsReady: Boolean = false,
     val ttsEngine: String = "",
     val scenarios: List<Scenario> = emptyList(),
+    /** 시연 패널 열림. 기본은 닫힘 — 앱을 켜면 실제 사용자 화면이 나온다. */
+    val demoPanel: Boolean = false,
 ) {
     /** 상세 확인·메모·삭제는 주차 중에만 */
     val detailAllowed: Boolean get() = vehicle == VehicleState.PARKED
@@ -110,6 +112,8 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
             if (summary != null && _ui.value.ttsReady) tts.speak(Texts.summarySpeech(summary, zone), 100) {}
         }
     }
+
+    fun toggleDemoPanel() = _ui.update { it.copy(demoPanel = !it.demoPanel) }
 
     fun setVehicle(state: VehicleState) {
         _ui.update { it.copy(vehicle = state) }

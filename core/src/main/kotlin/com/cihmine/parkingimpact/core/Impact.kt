@@ -9,10 +9,12 @@ import kotlinx.serialization.json.Json
  */
 @Serializable
 enum class Region(val label: String) {
-    FRONT_LEFT("좌측 앞"),
-    FRONT_RIGHT("우측 앞"),
-    REAR_LEFT("좌측 뒤"),
-    REAR_RIGHT("우측 뒤"),
+    FRONT("앞쪽"),
+    LEFT_FRONT_DOOR("왼쪽 앞문"),
+    LEFT_REAR_DOOR("왼쪽 뒷문"),
+    RIGHT_FRONT_DOOR("오른쪽 앞문"),
+    RIGHT_REAR_DOOR("오른쪽 뒷문"),
+    REAR("뒤쪽"),
 
     /** 신호가 비슷하거나 정보가 부족해 한 구역으로 좁히지 않음 */
     UNKNOWN("판단 어려움"),
@@ -69,12 +71,14 @@ object ImpactJson {
         .fold({ ParsedEvent.Ok(it) }, { ParsedEvent.Invalid("형식 오류: ${it.message?.lineSequence()?.firstOrNull()?.take(80)}") })
 }
 
-/** 가상 채널 4개. 차량에 이 위치의 센서가 있다는 뜻이 아니다. */
+/** 가상 채널 6개(구역마다 하나). 차량에 이 위치의 센서가 있다는 뜻이 아니다. */
 enum class VirtualChannel(val id: String, val region: Region) {
-    FRONT_LEFT("front_left_virtual", Region.FRONT_LEFT),
-    FRONT_RIGHT("front_right_virtual", Region.FRONT_RIGHT),
-    REAR_LEFT("rear_left_virtual", Region.REAR_LEFT),
-    REAR_RIGHT("rear_right_virtual", Region.REAR_RIGHT),
+    FRONT("front_virtual", Region.FRONT),
+    LEFT_FRONT_DOOR("left_front_door_virtual", Region.LEFT_FRONT_DOOR),
+    LEFT_REAR_DOOR("left_rear_door_virtual", Region.LEFT_REAR_DOOR),
+    RIGHT_FRONT_DOOR("right_front_door_virtual", Region.RIGHT_FRONT_DOOR),
+    RIGHT_REAR_DOOR("right_rear_door_virtual", Region.RIGHT_REAR_DOOR),
+    REAR("rear_virtual", Region.REAR),
     ;
 
     companion object {

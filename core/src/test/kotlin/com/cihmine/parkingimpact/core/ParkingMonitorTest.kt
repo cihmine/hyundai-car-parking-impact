@@ -20,13 +20,30 @@ class ParkingMonitorTest {
         assertIs<ReceiveResult.Recorded>(m.receive(scenario(name), 2_000)).record
 
     @Test
-    fun `P-T01 좌앞·우뒤 우세 시나리오는 해당 구역, 모의 입력으로 표시`() {
+    fun `P-T01 왼쪽 앞문·오른쪽 뒷문 우세 시나리오는 해당 구역, 모의 입력으로 표시`() {
         val m = parked()
-        val fl = recorded(m, "01_front_left")
-        assertEquals(Region.FRONT_LEFT, fl.estimate.region)
+        val fl = recorded(m, "01_left_front_door")
+        assertEquals(Region.LEFT_FRONT_DOOR, fl.estimate.region)
         assertEquals(Evidence.SUFFICIENT, fl.estimate.evidence)
         assertEquals(Source.SIMULATED, fl.source)
-        assertEquals(Region.REAR_RIGHT, recorded(m, "02_rear_right").estimate.region)
+        assertEquals(Region.RIGHT_REAR_DOOR, recorded(m, "02_right_rear_door").estimate.region)
+    }
+
+    @Test
+    fun `앞쪽·뒤쪽 시나리오는 문이 아니라 앞쪽·뒤쪽 구역으로 표시`() {
+        val m = parked()
+        assertEquals(Region.FRONT, recorded(m, "08_front").estimate.region)
+        assertEquals(Region.REAR, recorded(m, "09_rear").estimate.region)
+    }
+
+    @Test
+    fun `여섯 구역 어디든 그 채널이 우세하면 그 구역이 나온다`() {
+        val base = scenario("01_left_front_door")
+        val est = RegionEstimator()
+        for (channel in VirtualChannel.entries) {
+            val samples = VirtualChannel.entries.map { ImpactSample(it.id, 0, if (it == channel) 0.9 else 0.1) }
+            assertEquals(channel.region, assertIs<EstimationResult.Detected>(est.estimate(base.copy(samples = samples))).estimate.region)
+        }
     }
 
     @Test
@@ -34,7 +51,7 @@ class ParkingMonitorTest {
         val m = parked()
         val amb = recorded(m, "04_ambiguous").estimate
         assertEquals(Region.UNKNOWN, amb.region)
-        assertEquals(listOf(Region.FRONT_LEFT, Region.FRONT_RIGHT), amb.candidates)
+        assertEquals(listOf(Region.LEFT_FRONT_DOOR, Region.LEFT_REAR_DOOR), amb.candidates)
         val missing = recorded(m, "05_missing_channel").estimate
         assertEquals(Region.UNKNOWN, missing.region)
         assertTrue(missing.reason.startsWith("정보 부족"), missing.reason)
@@ -54,7 +71,7 @@ class ParkingMonitorTest {
 
     @Test
     fun `형식 오류 입력 — 버전·시각·채널·값·시간 범위`() {
-        val base = scenario("01_front_left")
+        val base = scenario("01_left_front_door")
         val est = RegionEstimator()
         fun reject(e: RawImpactEvent) = assertIs<EstimationResult.Rejected>(est.estimate(e)).reason
         assertTrue(reject(base.copy(schemaVersion = 2)).contains("버전"))
@@ -69,8 +86,8 @@ class ParkingMonitorTest {
     @Test
     fun `P-T04 같은 eventId 를 두 번 받아도 기록·알림은 한 번`() {
         val m = parked()
-        recorded(m, "01_front_left")
-        assertIs<ReceiveResult.Duplicate>(m.receive(scenario("01_front_left"), 3_000))
+        recorded(m, "01_left_front_door")
+        assertIs<ReceiveResult.Duplicate>(m.receive(scenario("01_left_front_door"), 3_000))
         assertEquals(1, m.state.records.size)
         assertEquals(1, m.returnToCar(4_000)?.count)
     }
@@ -78,8 +95,8 @@ class ParkingMonitorTest {
     @Test
     fun `P-T05 독립 사건 두 건은 따로 남고 요약 개수가 맞다`() {
         val m = parked()
-        recorded(m, "01_front_left")
-        recorded(m, "02_rear_right")
+        recorded(m, "01_left_front_door")
+        recorded(m, "02_right_rear_door")
         val summary = assertNotNull(m.returnToCar(5_000))
         assertEquals(2, summary.count)
         assertEquals("demo-impact-002", summary.latest.rawEventIds.single(), "가장 최근 사건을 먼저 알린다")
@@ -88,17 +105,17 @@ class ParkingMonitorTest {
     @Test
     fun `P-T06 기록 후 앱이 꺼졌다 켜져도 미확인 사건이 남는다`() {
         val m = parked()
-        recorded(m, "01_front_left")
+        recorded(m, "01_left_front_door")
         val restored = ParkingMonitor(MonitorCodec.decode(MonitorCodec.encode(m.state)))
         assertTrue(restored.state.isParking)
-        assertIs<ReceiveResult.Duplicate>(restored.receive(scenario("01_front_left"), 6_000), "재시작 뒤에도 중복 차단")
+        assertIs<ReceiveResult.Duplicate>(restored.receive(scenario("01_left_front_door"), 6_000), "재시작 뒤에도 중복 차단")
         assertEquals(1, restored.returnToCar(7_000)?.count)
     }
 
     @Test
     fun `P-T07 알림 닫기는 기록을 남기고, 확인 완료만 상태를 바꾼다`() {
         val m = parked()
-        val r = recorded(m, "01_front_left")
+        val r = recorded(m, "01_left_front_door")
         m.returnToCar(3_000)
         m.dismissNotice()
         assertEquals(1, m.state.unreviewed.size)
@@ -120,42 +137,45 @@ class ParkingMonitorTest {
     @Test
     fun `P-T10 삭제하면 목록·미확인 개수가 일치하고 같은 이벤트로 되살아나지 않는다`() {
         val m = parked()
-        val a = recorded(m, "01_front_left")
-        recorded(m, "02_rear_right")
+        val a = recorded(m, "01_left_front_door")
+        recorded(m, "02_right_rear_door")
         m.returnToCar(3_000)
         assertTrue(m.delete(a.id))
         assertEquals(1, m.state.records.size)
         assertEquals(1, m.state.unreviewed.size)
         assertEquals(1, m.state.notice!!.recordIds.size)
         m.startParking(4_000)
-        assertIs<ReceiveResult.Duplicate>(m.receive(scenario("01_front_left"), 5_000))
+        assertIs<ReceiveResult.Duplicate>(m.receive(scenario("01_left_front_door"), 5_000))
     }
 
     @Test
     fun `주차 중이 아니면 기록하지 않는다`() {
         val m = ParkingMonitor()
-        assertEquals(ReceiveResult.NoSession, m.receive(scenario("01_front_left"), 1_000))
+        assertEquals(ReceiveResult.NoSession, m.receive(scenario("01_left_front_door"), 1_000))
         assertTrue(m.state.records.isEmpty())
     }
 
     @Test
     fun `이전 주차의 미확인 기록도 다음 재탑승 요약에 포함된다`() {
         val m = parked()
-        recorded(m, "01_front_left")
+        recorded(m, "01_left_front_door")
         m.returnToCar(3_000)
         m.dismissNotice()
         m.startParking(4_000)
-        recorded(m, "02_rear_right")
+        recorded(m, "02_right_rear_door")
         assertEquals(2, m.returnToCar(5_000)?.count)
     }
 
     @Test
     fun `입력 채널 값을 바꾸면 규칙에 따라 다른 구역이 나온다(화면 정답만 바꾸는 목업이 아님)`() {
-        val base = scenario("01_front_left")
+        val base = scenario("01_left_front_door")
         val est = RegionEstimator()
-        val peaks = mapOf("front_left_virtual" to 0.1, "front_right_virtual" to 0.9, "rear_left_virtual" to 0.1, "rear_right_virtual" to 0.3)
+        val peaks = mapOf(
+            "front_virtual" to 0.1, "left_front_door_virtual" to 0.1, "left_rear_door_virtual" to 0.1,
+            "right_front_door_virtual" to 0.9, "right_rear_door_virtual" to 0.3, "rear_virtual" to 0.1,
+        )
         val moved = base.copy(samples = base.samples.map { it.copy(normalizedPeak = peaks.getValue(it.channelId)) })
-        assertEquals(Region.FRONT_RIGHT, assertIs<EstimationResult.Detected>(est.estimate(moved)).estimate.region)
+        assertEquals(Region.RIGHT_FRONT_DOOR, assertIs<EstimationResult.Detected>(est.estimate(moved)).estimate.region)
     }
 }
 
@@ -167,7 +187,7 @@ class ReviewRegressionTest {
     @Test
     fun `같은 재탑승을 다시 눌러도 닫은 알림을 다시 만들지 않는다`() {
         val m = ParkingMonitor().also { it.startParking(1_000) }
-        m.receive(scenario("01_front_left"), 2_000)
+        m.receive(scenario("01_left_front_door"), 2_000)
         assertNotNull(m.returnToCar(3_000))
         m.dismissNotice()
         assertNull(m.returnToCar(4_000), "새 주차 없이 다시 재탑승하면 알림 없음")
@@ -177,7 +197,7 @@ class ReviewRegressionTest {
     @Test
     fun `최신 사건은 문자열이 아니라 시각으로 고른다`() {
         val m = ParkingMonitor().also { it.startParking(1_000) }
-        val base = scenario("01_front_left")
+        val base = scenario("01_left_front_door")
         m.receive(base.copy(eventId = "a", occurredAt = "2026-11-02T03:00:00.100Z"), 2_000)
         m.receive(base.copy(eventId = "b", occurredAt = "2026-11-02T03:00:00Z"), 2_000)
         assertEquals("a", m.returnToCar(3_000)!!.latest.rawEventIds.single())
@@ -185,14 +205,14 @@ class ReviewRegressionTest {
 
     @Test
     fun `채널이 빠졌으면 약한 신호여도 충격 없음이 아니라 정보 부족`() {
-        val base = scenario("01_front_left")
-        val r = RegionEstimator().estimate(base.copy(samples = listOf(ImpactSample("front_left_virtual", 0, 0.1))))
+        val base = scenario("01_left_front_door")
+        val r = RegionEstimator().estimate(base.copy(samples = listOf(ImpactSample("left_front_door_virtual", 0, 0.1))))
         assertEquals(Region.UNKNOWN, assertIs<EstimationResult.Detected>(r).estimate.region)
     }
 
     @Test
     fun `점수가 모두 0이면 특정 구역을 고르지 않는다`() {
-        val base = scenario("01_front_left")
+        val base = scenario("01_left_front_door")
         val zero = base.copy(samples = base.samples.map { it.copy(normalizedPeak = 0.0) })
         val r = RegionEstimator(EstimatorConfig(noEventThreshold = 0.0)).estimate(zero)
         assertTrue(r !is EstimationResult.Detected || r.estimate.region == Region.UNKNOWN, "$r")
@@ -200,9 +220,9 @@ class ReviewRegressionTest {
 
     @Test
     fun `점수 차이 문구는 2위 대비 증가율과 일치한다`() {
-        val e = assertIs<EstimationResult.Detected>(RegionEstimator().estimate(scenario("01_front_left"))).estimate
-        val top = e.scores.getValue(Region.FRONT_LEFT)
-        val second = e.scores.getValue(Region.FRONT_RIGHT)
+        val e = assertIs<EstimationResult.Detected>(RegionEstimator().estimate(scenario("01_left_front_door"))).estimate
+        val top = e.scores.getValue(Region.LEFT_FRONT_DOOR)
+        val second = e.scores.getValue(Region.FRONT)
         val pct = ((top / second - 1) * 100).toInt()
         assertTrue(e.reason.contains("$pct%"), e.reason)
     }
@@ -217,7 +237,7 @@ class ReviewRegressionTest {
     @Test
     fun `저장 실패 시 되돌릴 수 있다`() {
         val m = ParkingMonitor().also { it.startParking(1_000) }
-        val r = assertIs<ReceiveResult.Recorded>(m.receive(scenario("01_front_left"), 2_000)).record
+        val r = assertIs<ReceiveResult.Recorded>(m.receive(scenario("01_left_front_door"), 2_000)).record
         val before = m.state
         m.delete(r.id)
         m.rollback(before)

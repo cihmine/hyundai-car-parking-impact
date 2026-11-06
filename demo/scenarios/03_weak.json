@@ -5,9 +5,11 @@
   "occurredAt": "2026-11-01T05:00:00Z",
   "description": "모든 채널이 작음(기록할 충격 없음)",
   "samples": [
-    {"channelId": "front_left_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.12},
-    {"channelId": "front_right_virtual", "relativeTimeMs": 1, "normalizedPeak": 0.10},
-    {"channelId": "rear_left_virtual", "relativeTimeMs": 2, "normalizedPeak": 0.09},
-    {"channelId": "rear_right_virtual", "relativeTimeMs": 3, "normalizedPeak": 0.11}
+    {"channelId": "front_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.12},
+    {"channelId": "left_front_door_virtual", "relativeTimeMs": 1, "normalizedPeak": 0.1},
+    {"channelId": "left_rear_door_virtual", "relativeTimeMs": 2, "normalizedPeak": 0.09},
+    {"channelId": "right_front_door_virtual", "relativeTimeMs": 3, "normalizedPeak": 0.11},
+    {"channelId": "right_rear_door_virtual", "relativeTimeMs": 4, "normalizedPeak": 0.1},
+    {"channelId": "rear_virtual", "relativeTimeMs": 5, "normalizedPeak": 0.08}
   ]
 }

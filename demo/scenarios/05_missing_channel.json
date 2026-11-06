@@ -5,7 +5,7 @@
   "occurredAt": "2026-11-01T06:10:00Z",
   "description": "채널 일부 누락(정보 부족)",
   "samples": [
-    {"channelId": "front_left_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.70},
-    {"channelId": "rear_left_virtual", "relativeTimeMs": 1, "normalizedPeak": 0.30}
+    {"channelId": "left_front_door_virtual", "relativeTimeMs": 0, "normalizedPeak": 0.7},
+    {"channelId": "left_rear_door_virtual", "relativeTimeMs": 1, "normalizedPeak": 0.3}
   ]
 }

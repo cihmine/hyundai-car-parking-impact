@@ -9,7 +9,7 @@ data class EstimatorConfig(
     val windowMs: Long = 2_000,
     /** 모든 채널 최대값이 이보다 작으면 기록할 충격 없음 */
     val noEventThreshold: Double = 0.4,
-    /** 이웃 구역(같은 쪽 앞뒤, 같은 축 좌우) 신호를 점수에 더하는 비율. 대각선은 더하지 않는다. */
+    /** 이웃 구역(차체를 따라 맞닿은 양옆 구역) 신호를 점수에 더하는 비율. 맞닿지 않은 구역은 더하지 않는다. */
     val neighborWeight: Double = 0.25,
     /** 1위와 2위 점수 차이(1위 대비 비율)가 이보다 작으면 한 구역으로 좁히지 않는다 */
     val unknownMargin: Double = 0.2,
@@ -91,10 +91,13 @@ class RegionEstimator(private val config: EstimatorConfig = EstimatorConfig.DEMO
     private fun channelOf(region: Region) = VirtualChannel.entries.first { it.region == region }
 
     private fun neighborsOf(region: Region): List<Region> = when (region) {
-        Region.FRONT_LEFT -> listOf(Region.FRONT_RIGHT, Region.REAR_LEFT)
-        Region.FRONT_RIGHT -> listOf(Region.FRONT_LEFT, Region.REAR_RIGHT)
-        Region.REAR_LEFT -> listOf(Region.REAR_RIGHT, Region.FRONT_LEFT)
-        Region.REAR_RIGHT -> listOf(Region.REAR_LEFT, Region.FRONT_RIGHT)
+        // 차체 둘레를 따라 앞쪽 → 왼쪽 앞문 → 왼쪽 뒷문 → 뒤쪽 → 오른쪽 뒷문 → 오른쪽 앞문 → 앞쪽으로 이어진다.
+        Region.FRONT -> listOf(Region.LEFT_FRONT_DOOR, Region.RIGHT_FRONT_DOOR)
+        Region.LEFT_FRONT_DOOR -> listOf(Region.FRONT, Region.LEFT_REAR_DOOR)
+        Region.LEFT_REAR_DOOR -> listOf(Region.LEFT_FRONT_DOOR, Region.REAR)
+        Region.REAR -> listOf(Region.LEFT_REAR_DOOR, Region.RIGHT_REAR_DOOR)
+        Region.RIGHT_REAR_DOOR -> listOf(Region.REAR, Region.RIGHT_FRONT_DOOR)
+        Region.RIGHT_FRONT_DOOR -> listOf(Region.RIGHT_REAR_DOOR, Region.FRONT)
         Region.UNKNOWN -> emptyList()
     }
 
