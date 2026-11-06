@@ -71,6 +71,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
     // Pleos Connect 음성 안내 SDK. Pleos 음성 서비스가 없는 기기에서는 안드로이드 기본 TTS 를 쓴다.
     implementation("ai.pleos.playground:TextToSpeech:3.3.1")
+    // 비상 화면의 현재 위치: 좌표(FusedLocation)와 주소(NaviHelper)
+    implementation("ai.pleos.playground:FusedLocation:1.1.3")
+    implementation("ai.pleos.playground:NaviHelper:3.0.5")
+    // 실제 기어 상태와 트렁크
+    implementation("ai.pleos.playground:Vehicle:2.3.2")
     implementation(platform("androidx.compose:compose-bom:2025.05.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")

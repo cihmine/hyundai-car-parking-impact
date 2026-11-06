@@ -24,7 +24,6 @@ data class ImpactRecord(
     val receivedAtMs: Long,
     val estimate: Estimate,
     val status: RecordStatus = RecordStatus.UNREVIEWED,
-    val note: String = "",
     val acknowledgedAtMs: Long? = null,
 )
 
@@ -120,6 +119,11 @@ class ParkingMonitor(
         ignore(label, nowMs, reason, ReceiveResult.Rejected(reason))
     }
 
+    /** 시연을 처음부터 다시 할 때 모든 기록과 중복 차단 목록을 지운다. */
+    fun reset() {
+        state = MonitorState()
+    }
+
     /** 저장에 실패했을 때 바꾸기 전 상태로 되돌린다(화면·디스크·메모리를 어긋나지 않게). */
     fun rollback(previous: MonitorState) {
         state = previous
@@ -165,11 +169,11 @@ class ParkingMonitor(
         state.notice?.let { state = state.copy(notice = it.copy(dismissed = true)) }
     }
 
-    /** 사건 확인 완료(메모 포함). 이미 확인한 기록도 메모는 고칠 수 있다. */
-    fun acknowledge(recordId: String, note: String, nowMs: Long): Boolean {
+    /** 사건 확인 완료 */
+    fun acknowledge(recordId: String, nowMs: Long): Boolean {
         val target = state.records.firstOrNull { it.id == recordId } ?: return false
         val updated = target.copy(
-            status = RecordStatus.REVIEWED, note = note.trim().take(MAX_NOTE),
+            status = RecordStatus.REVIEWED,
             acknowledgedAtMs = target.acknowledgedAtMs ?: nowMs,
         )
         state = state.copy(records = state.records.map { if (it.id == recordId) updated else it })
@@ -197,7 +201,6 @@ class ParkingMonitor(
     companion object {
         const val MAX_IGNORED = 50
         const val MAX_SESSIONS = 30
-        const val MAX_NOTE = 200
     }
 }
 

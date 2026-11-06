@@ -19,27 +19,29 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cihmine.parkingimpact.ParkingController
 import com.cihmine.parkingimpact.ParkingUi
 import com.cihmine.parkingimpact.Screen
+import com.cihmine.parkingimpact.core.AccidentState
+import com.cihmine.parkingimpact.core.ControlStatus
+import com.cihmine.parkingimpact.core.Hotline
+import com.cihmine.parkingimpact.core.Hotlines
 import com.cihmine.parkingimpact.core.ImpactRecord
 import com.cihmine.parkingimpact.core.RecordStatus
 import com.cihmine.parkingimpact.core.Region
@@ -47,18 +49,26 @@ import com.cihmine.parkingimpact.core.Texts
 import com.cihmine.parkingimpact.core.occurredMs
 import com.cihmine.parkingimpact.core.ParkingMonitor
 import com.cihmine.parkingimpact.vehicle.InputState
+import com.cihmine.parkingimpact.vehicle.MockCarReply
+import com.cihmine.parkingimpact.vehicle.TrunkOutcome
 import com.cihmine.parkingimpact.vehicle.VehicleState
 
 private val Banner = Color(0xFF3A2F00)
 private val BannerText = Color(0xFFFFD54F)
 private val Panel = Color(0xFF1E1E26)
+private val Danger = Color(0xFFC62828)
+private val Ok = Color(0xFF81C784)
+private val EmergencyButtonHeight = 64.dp
+
+/** 고정된 비상 버튼에 내용이 가리지 않게 비워 두는 높이 */
+private val EmergencyButtonClearance = 80.dp
 
 @Composable
 fun ParkingApp(c: ParkingController) {
     val ui by c.ui.collectAsState()
     Surface(Modifier.fillMaxSize(), color = Color(0xFF121218), contentColor = Color.White) { Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(Banner).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text("차량 연동 시뮬레이션 · 충격 입력: 가상 센서 시나리오 · 차량 상태: 모의 ${ui.vehicle.label}", color = BannerText, fontSize = 15.sp)
+            Text("차량 연동 시뮬레이션 · 충격 입력: 가상 센서 시나리오 · 차량 상태: ${ui.gearLabel?.let { "실제 기어 $it" } ?: "모의 ${ui.vehicle.label}"}", color = BannerText, fontSize = 15.sp)
             Spacer(Modifier.weight(1f))
             Text("음성 안내: ${ui.ttsEngine}${if (ui.ttsReady) "" else "(준비 안 됨)"}", color = BannerText, fontSize = 15.sp)
             Spacer(Modifier.width(24.dp))
@@ -72,11 +82,21 @@ fun ParkingApp(c: ParkingController) {
         }
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight().padding(24.dp)) {
-                when (val s = ui.screen) {
+                val accident = ui.accident
+                if (accident != null) AccidentScreen(ui, accident, c)
+                else if (!ui.detailAllowed) Driving(ui)
+                else when (ui.screen) {
                     Screen.Home -> Home(ui, c)
-                    Screen.Summary -> Summary(ui, c)
                     Screen.Records -> Records(ui, c)
-                    is Screen.Detail -> Detail(ui, c, s.recordId)
+                }
+                // 어느 화면에서든 같은 자리에서 바로 누를 수 있게 고정한다.
+                if (accident == null) {
+                    Button(
+                        onClick = c::startAccident,
+                        // 주행 중에는 같은 자리에서 크기만 키워 찾기 쉽게 한다.
+                        modifier = Modifier.align(Alignment.BottomEnd).height(if (ui.detailAllowed) EmergencyButtonHeight else 130.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Danger, contentColor = Color.White),
+                    ) { Text("비상 버튼", fontSize = if (ui.detailAllowed) 24.sp else 38.sp, fontWeight = FontWeight.Bold) }
                 }
             }
             if (ui.demoPanel) DemoPanel(ui, c)
@@ -84,126 +104,199 @@ fun ParkingApp(c: ParkingController) {
     } }
 }
 
+/**
+ * 기본 화면. 평소에는 확인할 기록이 없다고 보여 주고, 충격 의심이 있으면 같은 화면에서 문구를 보고 확인 완료까지 한다.
+ * 확인 완료하면 다음 미확인 기록이나 평소 상태로 돌아온다.
+ */
 @Composable
 private fun Home(ui: ParkingUi, c: ParkingController) {
     val m = ui.monitor
     val session = m.session
-    // 실제 사용자 화면: 왼쪽에 위에서 본 차량을 크게, 오른쪽에 상태
+    val pending = ParkingMonitor(m).currentSummary()
+    val estimate = pending?.latest?.estimate
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
-    CarDiagram(highlight = null, counts = m.unreviewed.groupingBy { it.estimate.region }.eachCount(), width = 360.dp)
-    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    CarDiagram(
+        highlight = estimate?.region?.takeIf { it != Region.UNKNOWN },
+        candidates = estimate?.candidates.orEmpty(),
+        counts = m.unreviewed.groupingBy { it.estimate.region }.eachCount(),
+        width = 360.dp,
+    )
+    Column(Modifier.weight(1f).padding(bottom = EmergencyButtonClearance), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("주차 충격 확인", fontSize = 34.sp, fontWeight = FontWeight.Bold)
-        Text("주차 중 생긴 충격 의심 기록을 구역과 함께 남기고, 다시 탈 때 알려 드려요.", fontSize = 17.sp, color = Color.LightGray)
         val status = when {
             session == null -> "주차 기록 중 아님"
             ui.input == InputState.DISCONNECTED -> "입력 연결 안 됨 — 지금은 감시하지 않아요"
             else -> "데모 감시 중(모의 입력) · ${c.time(java.time.Instant.ofEpochMilli(session.startedAtMs).toString())}부터"
         }
-        Box(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(12.dp)).padding(20.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(status, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
-                    color = if (m.session != null && ui.input == InputState.DISCONNECTED) Highlight else Color.White)
-                Text("확인하지 않은 기록 ${m.unreviewed.size}건 · 전체 ${m.records.size}건", fontSize = 18.sp)
-            }
+        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(12.dp)).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (pending != null) ImpactNotice(c, pending.latest, pending.count, headline = 21.sp)
+            else Text("확인할 충격 기록이 없어요", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ok)
+            Text(status, fontSize = 17.sp, color = if (session != null && ui.input == InputState.DISCONNECTED) Highlight else Color.LightGray)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { c.open(Screen.Records) }, Modifier.height(56.dp)) { Text("기록 보기", fontSize = 18.sp) }
-            if (m.notice != null && m.unreviewed.isNotEmpty()) {
-                OutlinedButton(onClick = { c.open(Screen.Summary) }, Modifier.height(56.dp)) { Text("재탑승 요약 다시 보기", fontSize = 18.sp) }
+            if (pending != null) {
+                Button(onClick = { c.acknowledge(pending.latest.id) }, modifier = Modifier.height(56.dp)) { Text("확인 완료", fontSize = 18.sp) }
+            }
+            if (m.records.isNotEmpty()) OutlinedButton(onClick = { c.open(Screen.Records) }, Modifier.height(56.dp)) { Text("기록 보기", fontSize = 18.sp) }
+        }
+        if (pending != null) Text(Texts.ACK_MEANING, fontSize = 14.sp, color = Color.Gray)
+        Text("시제품이에요. 체험은 오른쪽 위 '시연 패널'에서 시동 끔 → 시나리오 → 시동 켬 순서로 해 보세요.", fontSize = 14.sp, color = Color.Gray)
+    }
+    }
+}
+
+/** 가장 최근 충격 의심과, 구역이 추정이니 차 전체를 확인하라는 안내. 사용자가 확인 완료할 때까지 보여 준다. */
+@Composable
+private fun ImpactNotice(c: ParkingController, latest: ImpactRecord, count: Int, headline: TextUnit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(c.impactNotice(latest), fontSize = headline, fontWeight = FontWeight.Bold, color = Highlight)
+        Text(Texts.IMPACT_CHECK_NOTE, fontSize = 15.sp, color = Color.LightGray)
+        if (count > 1) Text("다른 기록 ${count - 1}건 더 있어요", fontSize = 15.sp, color = Color.LightGray)
+    }
+}
+
+/** 주행 화면. 운전 중에 읽을 내용을 주지 않고, 할 수 있는 일은 비상 버튼뿐이다. */
+@Composable
+private fun Driving(ui: ParkingUi) {
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("안전 운전하세요", fontSize = 44.sp, fontWeight = FontWeight.Bold)
+        val count = ui.monitor.unreviewed.size
+        if (count > 0) {
+            Spacer(Modifier.height(16.dp))
+            Text("확인할 기록 ${count}건은 주차 후 보여 드려요", fontSize = 22.sp, color = Highlight)
+        }
+    }
+}
+
+/** 비상 버튼을 누른 뒤의 화면. 대피 안내를 가장 크게 보여 주고, 차가 멈추면 도움을 요청할 번호를 띄운다. */
+@Composable
+private fun AccidentScreen(ui: ParkingUi, a: AccidentState, c: ParkingController) {
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(36.dp), verticalAlignment = Alignment.CenterVertically) {
+        CarDiagram(
+            highlight = null,
+            width = 280.dp,
+            hazardLit = a.hazard == ControlStatus.DONE && (ui.accidentNowMs / 500) % 2 == 0L,
+            trunkOpen = a.trunk == ControlStatus.DONE,
+            trunkLabel = when (ui.trunkOutcome) {
+                TrunkOutcome.MOCK -> "트렁크 열림(모의)"
+                TrunkOutcome.OPENED -> "트렁크 열림"
+                else -> "트렁크 열림 미확인"
+            },
+        )
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("비상 대응 중", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Highlight)
+            Text(
+                if (a.stopConfirmed) "안전하면 가드레일 밖으로 대피해 주세요" else "안전한 곳에 차를 세워 주세요",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            // 열렸다고 아는 경우에만 경고한다. 명령만 보내고 열림을 확인하지 못했으면 아래 트렁크 줄이 그 사실을 알려 준다.
+            if (a.trunkOpenWhileMoving && ui.trunkOutcome in listOf(TrunkOutcome.MOCK, TrunkOutcome.OPENED)) {
+                Text("트렁크가 열려 있어요 — 차를 세워 주세요", fontSize = 19.sp, color = Highlight, fontWeight = FontWeight.Bold)
+            }
+            Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(12.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ControlRow("비상등", a.hazard)
+                if (a.trunk == ControlStatus.DONE && ui.trunkOutcome != TrunkOutcome.MOCK) {
+                    when (ui.trunkOutcome) {
+                        TrunkOutcome.OPENED -> StatusRow("트렁크", "열림 확인", Ok)
+                        TrunkOutcome.CHECKING -> StatusRow("트렁크", "명령 전송 — 열림 확인 중…", Color.LightGray)
+                        else -> StatusRow("트렁크", "명령 전송 — 열림 미확인, 직접 확인해 주세요", Highlight)
+                    }
+                } else ControlRow("트렁크", a.trunk)
+            }
+            if (a.showContacts) Contacts(ui) else {
+                Button(onClick = c::requestContacts, Modifier.height(60.dp)) { Text("차를 세웠어요 · 연락처 보기", fontSize = 19.sp) }
+            }
+            OutlinedButton(onClick = c::finishAccident, Modifier.height(56.dp)) { Text("비상 대응 끝내기", fontSize = 18.sp) }
+            Text(Texts.ACCIDENT_NOT_REAL, fontSize = 14.sp, color = Color.Gray)
+        }
+    }
+}
+
+/** 도움을 요청할 번호. 차 밖에서도 읽히게 번호를 크게 쓴다. */
+@Composable
+private fun Contacts(ui: ParkingUi) {
+    Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(12.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("현재 위치 · 전화할 때 알려 주세요", fontSize = 16.sp, color = Color.LightGray)
+        Text(Texts.locationHeadline(ui.shownAddress, ui.position, ui.locationFailed), fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+        if (ui.shownAddress != null) ui.position?.let { Text(Texts.coordinates(it), fontSize = 14.sp, color = Color.Gray) }
+        HorizontalDivider()
+        Text(Hotlines.ROAD.name, fontSize = 16.sp, color = Color.LightGray)
+        Text(Hotlines.ROAD.number, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = BannerText)
+        HorizontalDivider()
+        Text("보험사 긴급출동", fontSize = 16.sp, color = Color.LightGray)
+        Hotlines.INSURERS.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { InsurerCell(it, Modifier.weight(1f)) }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        Text("이 시제품은 실제 차량에서 충격을 감지하지 않아요. 판정은 '충격 의심·구역 추정'이며 파손 여부나 책임을 판단하지 않아요.",
-            fontSize = 14.sp, color = Color.Gray)
-        Text("체험은 오른쪽 위 '시연 패널'에서 주차 시작 → 시나리오 → 재탑승 순서로 해 보세요.", fontSize = 14.sp, color = Color.Gray)
-    }
+        Text(Texts.INSURER_NOTE, fontSize = 13.sp, color = Color.Gray)
     }
 }
 
 @Composable
-private fun Summary(ui: ParkingUi, c: ParkingController) {
-    // 확인·삭제 뒤에도 맞도록 저장 상태에서 매번 다시 계산한다.
-    val s = ParkingMonitor(ui.monitor).currentSummary()
-    if (s == null) return Text("확인할 기록이 없어요.", fontSize = 22.sp)
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("주차 중 충격 의심 기록 ${s.count}건이 있어요", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Highlight)
-        Text("가장 최근: ${c.time(s.latest.occurredAt)} · ${Texts.regionPhrase(s.latest.estimate)}", fontSize = 20.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            CarDiagram(
-                highlight = s.latest.estimate.region.takeIf { it != Region.UNKNOWN },
-                candidates = s.latest.estimate.candidates,
-                counts = ui.monitor.unreviewed.groupingBy { it.estimate.region }.eachCount(),
-                width = 300.dp,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (!ui.detailAllowed) Text("주행 중에는 상세 확인을 할 수 없어요. 차를 세운 뒤 확인해 주세요.", color = Highlight, fontSize = 17.sp)
-                Button(onClick = { c.open(Screen.Records) }, enabled = ui.detailAllowed, modifier = Modifier.height(56.dp)) { Text("기록 확인하기", fontSize = 18.sp) }
-                OutlinedButton(onClick = c::dismissSummary, Modifier.height(56.dp)) { Text("닫기(기록은 남아요)", fontSize = 18.sp) }
-            }
-        }
+private fun InsurerCell(line: Hotline, modifier: Modifier) {
+    Column(modifier) {
+        Text(line.name, fontSize = 14.sp, color = Color.LightGray)
+        Text(line.number, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
+@Composable
+private fun ControlRow(name: String, status: ControlStatus) = StatusRow(
+    name,
+    status.label,
+    when (status) {
+        ControlStatus.DONE -> Ok
+        ControlStatus.FAILED -> Highlight
+        else -> Color.LightGray
+    },
+)
+
+@Composable
+private fun StatusRow(name: String, value: String, color: Color) {
+    Row {
+        Text(name, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(88.dp))
+        Text(value, fontSize = 19.sp, color = color)
+    }
+}
+
+/** 기록 화면. 목록에서 바로 근거를 보고 확인 완료·삭제까지 한다. */
 @Composable
 private fun Records(ui: ParkingUi, c: ParkingController) {
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("충격 의심 기록", fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(16.dp))
-            OutlinedButton(onClick = { c.open(Screen.Home) }) { Text("처음 화면") }
+            OutlinedButton(onClick = { c.open(Screen.Home) }) { Text("기본 화면") }
         }
-        if (!ui.detailAllowed) Text("주행 중에는 상세 확인을 할 수 없어요.", color = Highlight, fontSize = 17.sp)
         val list = ui.monitor.records.sortedByDescending { occurredMs(it) }
         if (list.isEmpty()) Text("기록이 없어요.", fontSize = 18.sp)
         list.forEach { r -> RecordRow(r, c, enabled = ui.detailAllowed) }
+        if (list.isNotEmpty()) Text(Texts.EVIDENCE_MEANING, fontSize = 14.sp, color = Color.Gray)
+        Spacer(Modifier.height(EmergencyButtonClearance))
     }
 }
 
 @Composable
 private fun RecordRow(r: ImpactRecord, c: ParkingController, enabled: Boolean) {
     val reviewed = r.status == RecordStatus.REVIEWED
-    Row(
-        Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(10.dp))
-            .clickable(enabled = enabled) { c.open(Screen.Detail(r.id)) }.padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(if (reviewed) "확인 완료" else "미확인", color = if (reviewed) Color.Gray else Highlight, fontSize = 17.sp, modifier = Modifier.width(96.dp))
-        Text(c.time(r.occurredAt), fontSize = 18.sp, modifier = Modifier.width(240.dp))
-        Text(Texts.regionPhrase(r.estimate), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.weight(1f))
-        Text(r.source.label, fontSize = 14.sp, color = Color.Gray)
-    }
-}
-
-@Composable
-private fun Detail(ui: ParkingUi, c: ParkingController, recordId: String) {
-    val r = ui.monitor.records.firstOrNull { it.id == recordId } ?: return Text("삭제된 기록이에요.", fontSize = 20.sp)
-    var note by remember(recordId) { mutableStateOf(r.note) }
-    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(10.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("사건 상세", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(16.dp))
-            OutlinedButton(onClick = { c.open(Screen.Records) }) { Text("목록") }
+            Text(if (reviewed) "확인 완료" else "미확인", color = if (reviewed) Color.Gray else Highlight, fontSize = 17.sp, modifier = Modifier.width(96.dp))
+            Text(c.time(r.occurredAt), fontSize = 18.sp, modifier = Modifier.width(240.dp))
+            Text(Texts.regionPhrase(r.estimate), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            Text(r.source.label, fontSize = 14.sp, color = Color.Gray)
         }
-        if (!ui.detailAllowed) return@Column Text("주행 중에는 상세 확인을 할 수 없어요. 차를 세운 뒤 확인해 주세요.", color = Highlight, fontSize = 20.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            CarDiagram(r.estimate.region.takeIf { it != Region.UNKNOWN }, r.estimate.candidates, width = 300.dp)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("발생 시각: ${c.time(r.occurredAt)}", fontSize = 19.sp)
-                Text("확인 권장 구역: ${Texts.regionPhrase(r.estimate)}", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                Text("근거: ${r.estimate.evidence.label} — ${r.estimate.reason}", fontSize = 17.sp)
-                Text(Texts.EVIDENCE_MEANING, fontSize = 14.sp, color = Color.Gray)
-                Text("원천 데이터: ${r.source.label}(가상 센서 시나리오 ${r.rawEventIds.joinToString()})", fontSize = 14.sp, color = Color.Gray)
-                Text("상태: ${if (r.status == RecordStatus.REVIEWED) "확인 완료" else "미확인"}", fontSize = 17.sp)
+        if (enabled) {
+            Text("${r.estimate.evidence.label} — ${r.estimate.reason}", fontSize = 15.sp, color = Color.LightGray)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!reviewed) Button(onClick = { c.acknowledge(r.id) }) { Text("확인 완료") }
+                OutlinedButton(onClick = { c.delete(r.id) }) { Text("삭제") }
             }
         }
-        OutlinedTextField(note, { note = it.take(200) }, label = { Text("메모(선택)") }, modifier = Modifier.fillMaxWidth(0.7f))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { c.acknowledge(r.id, note) }, Modifier.height(56.dp)) {
-                Text(if (r.status == RecordStatus.REVIEWED) "메모 저장" else "확인 완료", fontSize = 18.sp)
-            }
-            OutlinedButton(onClick = { c.delete(r.id) }, Modifier.height(56.dp)) { Text("삭제", fontSize = 18.sp) }
-        }
-        Text(Texts.ACK_MEANING, fontSize = 14.sp, color = Color.Gray)
     }
 }
 
@@ -217,15 +310,21 @@ private fun DemoPanel(ui: ParkingUi, c: ParkingController) {
         Text("시연 패널", color = BannerText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Text("실제 사용자 화면이 아닌 시연·검증용 입력", fontSize = 12.sp, color = Color.Gray)
         HorizontalDivider()
-        Text("주차·재탑승(모의)", fontSize = 15.sp)
+        Text("시동(모의)", fontSize = 15.sp)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = c::startParking, enabled = ui.monitor.session == null) { Text("주차 시작") }
-            Button(onClick = c::returnToCar) { Text("재탑승") }
+            Button(onClick = c::startParking, enabled = ui.monitor.session == null) { Text("시동 끔(주차)") }
+            Button(onClick = c::returnToCar) { Text("시동 켬(재탑승)") }
         }
         Text("모의 차량 상태", fontSize = 15.sp)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             VehicleState.entries.forEach { v -> FilterChip(ui.vehicle == v, { c.setVehicle(v) }, { Text(v.label) }) }
         }
+        Text("실제 기어 값이 바뀌면 그 값이 우선해요.", fontSize = 12.sp, color = Color.Gray)
+        Text("모의 차량 제어 응답(비상 버튼)", fontSize = 15.sp)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MockCarReply.entries.forEach { r -> FilterChip(ui.carReply == r, { c.setCarReply(r) }, { Text(r.label) }) }
+        }
+        Text("정상 응답이면 차량이 지원할 때 트렁크 명령을 실제로 보내요.", fontSize = 12.sp, color = Color.Gray)
         Text("충격 입력 공급", fontSize = 15.sp)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             InputState.entries.forEach { s -> FilterChip(ui.input == s, { c.setInput(s) }, { Text(s.label) }) }
@@ -235,6 +334,7 @@ private fun DemoPanel(ui: ParkingUi, c: ParkingController) {
         ui.scenarios.forEach { s ->
             OutlinedButton(onClick = { c.inject(s) }, Modifier.fillMaxWidth()) { Text(s.title, fontSize = 13.sp) }
         }
+        OutlinedButton(onClick = c::resetDemo, Modifier.fillMaxWidth()) { Text("시연 처음부터(기록 모두 지움)") }
         ui.lastResult?.let {
             HorizontalDivider()
             Text("결과: $it", fontSize = 14.sp, color = BannerText)

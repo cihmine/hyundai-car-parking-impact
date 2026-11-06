@@ -30,6 +30,8 @@ import com.cihmine.parkingimpact.core.Region
 
 val Highlight = Color(0xFFFFB74D)
 val Possible = Color(0xFFFFE0B2)
+private val HazardLight = Color(0xFFFF9800)
+private val TrunkOpen = Color(0xFF80CBC4)
 private val Idle = Color(0xFF3A3A44)
 private val Roof = Color(0xFF24242C)
 private val Tire = Color(0xFF6A6A74)
@@ -65,6 +67,10 @@ fun CarDiagram(
     candidates: List<Region> = emptyList(),
     counts: Map<Region, Int> = emptyMap(),
     width: Dp = 220.dp,
+    /** 비상등 불빛(깜빡임은 부르는 쪽에서 켜고 끈다) */
+    hazardLit: Boolean = false,
+    trunkOpen: Boolean = false,
+    trunkLabel: String = "트렁크 열림",
 ) {
     val measurer = rememberTextMeasurer()
     val labelSize = (width.value * 0.05f).sp
@@ -83,6 +89,7 @@ fun CarDiagram(
                 for (r in ZONES) {
                     val z = zoneOf(r)
                     val color = when {
+                        r == Region.REAR && trunkOpen -> TrunkOpen
                         r == highlight -> Highlight
                         r in candidates || (counts[r] ?: 0) > 0 -> Possible
                         else -> Idle
@@ -104,14 +111,21 @@ fun CarDiagram(
             drawPath(trapezoid(at(0.34f, 0.26f), at(0.66f, 0.26f), at(0.62f, 0.34f), at(0.38f, 0.34f)), glass, style = Stroke(width = 3f))
             drawPath(trapezoid(at(0.38f, 0.72f), at(0.62f, 0.72f), at(0.66f, 0.78f), at(0.34f, 0.78f)), glass, style = Stroke(width = 3f))
 
+            if (hazardLit) {
+                for (x in listOf(0.13f, 0.87f)) for (y in listOf(0.035f, 0.965f)) {
+                    drawCircle(HazardLight, body.width * 0.07f, at(x, y))
+                }
+            }
+
             for (r in ZONES) {
                 val z = zoneOf(r)
                 val lit = r == highlight || r in candidates || (counts[r] ?: 0) > 0
                 val count = counts[r]?.takeIf { it > 0 }?.let { "\n${it}건" }.orEmpty()
+                val name = if (r == Region.REAR && trunkOpen) trunkLabel else zoneLabel(r).replace("\n", if (r == Region.FRONT || r == Region.REAR) " " else "\n")
                 val text = measurer.measure(
-                    zoneLabel(r).replace("\n", if (r == Region.FRONT || r == Region.REAR) " " else "\n") + count,
+                    name + count,
                     TextStyle(
-                        color = if (lit) Color(0xFF201A10) else Color.White,
+                        color = if (lit || (r == Region.REAR && trunkOpen)) Color(0xFF201A10) else Color.White,
                         fontSize = labelSize,
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,

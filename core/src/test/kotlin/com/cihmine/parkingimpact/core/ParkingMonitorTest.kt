@@ -120,10 +120,29 @@ class ParkingMonitorTest {
         m.dismissNotice()
         assertEquals(1, m.state.unreviewed.size)
         assertTrue(m.state.notice!!.dismissed)
-        assertTrue(m.acknowledge(r.id, "  앞범퍼 확인함  ", 4_000))
+        assertTrue(m.acknowledge(r.id, 4_000))
         assertEquals(RecordStatus.REVIEWED, m.state.records.single().status)
-        assertEquals("앞범퍼 확인함", m.state.records.single().note)
         assertNull(m.state.notice, "모두 확인하면 알림 상태를 지운다")
+    }
+
+    @Test
+    fun `시연 초기화 뒤에는 같은 시나리오를 다시 기록할 수 있다`() {
+        val m = parked()
+        recorded(m, "01_left_front_door")
+        m.reset()
+        assertTrue(m.state.records.isEmpty())
+        m.startParking(3_000)
+        assertIs<ReceiveResult.Recorded>(m.receive(scenario("01_left_front_door"), 4_000))
+    }
+
+    @Test
+    fun `메모가 있던 예전 저장 파일도 그대로 읽는다`() {
+        val m = parked()
+        recorded(m, "01_left_front_door")
+        val saved = MonitorCodec.encode(m.state)
+        val old = saved.replace("\"status\":", "\"note\":\"앞범퍼 확인함\",\"status\":")
+        assertTrue("앞범퍼" in old, "메모 필드를 넣은 예전 형식을 만든다")
+        assertEquals(m.state.records, MonitorCodec.decode(old).records)
     }
 
     @Test

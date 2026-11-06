@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Pleos 음성 안내 SDK(재탑승 요약 읽기) -->
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+    <!-- 비상 화면의 현재 위치(비상 대응 중에만 읽고 저장하지 않음) -->
+    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
+    <!-- 기어 상태 읽기, 트렁크 위치 읽기·제어 -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <uses-permission android:name="pleos.car.permission.CAR_DOORS" />
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_DOORS" />
 
     <!-- 차량(Pleos Connect)용이지만 일반 에뮬레이터에서도 확인할 수 있게 필수로 두지 않는다 -->
-    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" tools:replace="android:required" />
 
     <queries>
         <intent>
