@@ -25,6 +25,8 @@ data class ImpactRecord(
     val estimate: Estimate,
     val status: RecordStatus = RecordStatus.UNREVIEWED,
     val acknowledgedAtMs: Long? = null,
+    /** 주행 중(주차 세션 없음)에 받은 기록. 그때는 화면을 띄우지 않고 음성으로만 알린다. */
+    val whileDriving: Boolean = false,
 )
 
 /** 저장하지 않은 입력(약한 신호·형식 오류·중복·세션 없음)의 이유. 진단용으로 최근 것만 남긴다. */
@@ -87,10 +89,11 @@ class ParkingMonitor(
 
     /**
      * 가상 센서 이벤트 수신. 같은 eventId 는 한 번만 기록한다(삭제한 기록이어도 다시 만들지 않는다).
-     * 주차 중이 아니면 기록하지 않는다.
+     * 주차 중이 아니면 기록하지 않는다. 단 [driving] 이면(시동 켜고 달리는 중) 주행 중 기록으로 남긴다.
      */
-    fun receive(event: RawImpactEvent, nowMs: Long): ReceiveResult {
-        val session = state.session ?: return ignore(event.eventId, nowMs, "주차 중이 아님", ReceiveResult.NoSession)
+    fun receive(event: RawImpactEvent, nowMs: Long, driving: Boolean = false): ReceiveResult {
+        val session = state.session
+        if (session == null && !driving) return ignore(event.eventId, nowMs, "주차 중이 아님", ReceiveResult.NoSession)
         if (event.eventId in state.seenEventIds) {
             return ignore(event.eventId, nowMs, "이미 받은 이벤트", ReceiveResult.Duplicate(event.eventId))
         }
@@ -102,8 +105,9 @@ class ParkingMonitor(
             }
             is EstimationResult.Detected -> {
                 val record = ImpactRecord(
-                    id = "record-${state.nextId}", rawEventIds = listOf(event.eventId), sessionId = session.id,
+                    id = "record-${state.nextId}", rawEventIds = listOf(event.eventId), sessionId = session?.id ?: DRIVING_SESSION,
                     source = event.source, occurredAt = event.occurredAt, receivedAtMs = nowMs, estimate = r.estimate,
+                    whileDriving = session == null,
                 )
                 state = state.copy(
                     records = state.records + record, seenEventIds = state.seenEventIds + event.eventId,
@@ -201,6 +205,33 @@ class ParkingMonitor(
     companion object {
         const val MAX_IGNORED = 50
         const val MAX_SESSIONS = 30
+
+        /** 주행 중 기록의 세션 자리 표시 */
+        const val DRIVING_SESSION = "driving"
+    }
+}
+
+/**
+ * 주행 중 음성 알림을 너무 자주 내지 않게 막는다. 노면 때문에 충격이 몰려 들어와도
+ * [cooldownMs] 안에는 한 번만 말하고 나머지는 조용히 기록만 한다. 시각은 단조 시계 값을 넣는다.
+ */
+class DrivingAlertGate(private val cooldownMs: Long = DEFAULT_COOLDOWN_MS) {
+    private var lastSpokenAt: Long? = null
+
+    /** 지금 말해도 되면 true 를 돌려주고 말한 것으로 친다. */
+    fun allow(nowMs: Long): Boolean {
+        val last = lastSpokenAt
+        if (last != null && nowMs - last < cooldownMs) return false
+        lastSpokenAt = nowMs
+        return true
+    }
+
+    fun reset() {
+        lastSpokenAt = null
+    }
+
+    companion object {
+        const val DEFAULT_COOLDOWN_MS = 60_000L
     }
 }
 

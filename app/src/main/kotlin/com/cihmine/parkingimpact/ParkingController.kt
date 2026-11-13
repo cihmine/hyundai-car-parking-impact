@@ -10,6 +10,7 @@ import com.cihmine.parkingimpact.core.AccidentState
 import com.cihmine.parkingimpact.core.CarCommand
 import com.cihmine.parkingimpact.core.CarPosition
 import com.cihmine.parkingimpact.core.ControlStatus
+import com.cihmine.parkingimpact.core.DrivingAlertGate
 import com.cihmine.parkingimpact.core.ImpactJson
 import com.cihmine.parkingimpact.core.ImpactRecord
 import com.cihmine.parkingimpact.core.matchedAddress
@@ -174,6 +175,10 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
     fun resetDemo() {
         if (accident.state != null) finishAccident()
         tts.stop()
+        drivingGate.reset()
+        // 실패·무응답·입력 단절 시연 뒤에도 처음부터 같은 결과가 나오게 모의 설정도 되돌린다(실제 기어 값은 그대로 둔다)
+        _ui.update { it.copy(input = InputState.SIMULATED_CONNECTED, carReply = MockCarReply.OK) }
+        if (_ui.value.gearLabel == null) applyVehicle(VehicleState.PARKED)
         transact({ monitor.reset() }) { show("처음 상태로 되돌렸어요") { copy(screen = Screen.Home) } }
     }
 
@@ -188,7 +193,7 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
     private fun applyVehicle(state: VehicleState) {
         _ui.update { it.copy(vehicle = state) }
         val before = accident.state ?: return
-        val commands = accident.vehicleChanged(state == VehicleState.PARKED, elapsed())
+        val commands = accident.vehicleChanged(state == VehicleState.PARKED, elapsed(), moving = state == VehicleState.MOVING)
         if (CarCommand.TRUNK_OPEN in commands) say(Texts.ACCIDENT_EVACUATE)
         send(commands)
         publishAccident(before)
@@ -215,10 +220,14 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
                 return
             }
         }
-        transact({ monitor.receive(event, now()) }) { r ->
+        // 시동 켜고 달리는 중(주차 세션 없음·기어 P 아님)이면 주행 중 기록으로 받는다.
+        val driving = monitor.state.session == null && _ui.value.vehicle != VehicleState.PARKED
+        transact({ monitor.receive(event, now(), driving) }) { r ->
+            if (r is ReceiveResult.Recorded && r.record.whileDriving) alertWhileDriving(r.record)
             show(
                 when (r) {
-                    is ReceiveResult.Recorded -> "기록함: ${Texts.regionPhrase(r.record.estimate)} · ${r.record.estimate.evidence.label}"
+                    is ReceiveResult.Recorded -> "기록함: ${Texts.regionPhrase(r.record.estimate)} · ${r.record.estimate.evidence.label}" +
+                        if (r.record.whileDriving) " · 주행 중(화면 그대로, ${if (lastDrivingSpoken) "음성 안내" else "음성 생략 — 1분 안에 이미 알림"})" else ""
                     is ReceiveResult.Duplicate -> "이미 받은 이벤트 — 새 기록을 만들지 않음"
                     is ReceiveResult.NoEvent -> "기록할 충격 없음: ${r.reason}"
                     is ReceiveResult.Rejected -> "저장 안 함: ${r.reason}"
@@ -227,6 +236,18 @@ class ParkingController(app: Application) : AndroidViewModel(app) {
             )
         }
     }
+
+    /**
+     * 주행 중 충격: 화면은 바꾸지 않고 음성으로만 짧게 알린다. 노면 충격이 몰려도 1분에 한 번만 말한다.
+     * 비상 대응 중이면 그 안내를 끊지 않게 말하지 않는다. 기록은 주차 후 기본 화면에서 확인한다.
+     */
+    private fun alertWhileDriving(record: ImpactRecord) {
+        lastDrivingSpoken = _ui.value.accident == null && drivingGate.allow(elapsed())
+        if (lastDrivingSpoken) say(Texts.drivingSpeech(record))
+    }
+
+    private val drivingGate = DrivingAlertGate()
+    private var lastDrivingSpoken = false
 
     // ── 비상 대응(모의) ─────────────────────────────────────
     // 판단은 AccidentResponse 가 한다. 여기서는 모의 차량 응답, 시간 경과, 음성 순서만 다룬다.

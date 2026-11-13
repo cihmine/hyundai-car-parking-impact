@@ -70,6 +70,19 @@ class AccidentResponseTest {
     }
 
     @Test
+    fun `P-T26 '차를 세웠어요' 뒤 다시 주행하면 번호를 숨긴다`() {
+        val a = AccidentResponse()
+        a.start(t0, stopConfirmed = false)
+        a.requestContacts()
+        assertTrue(a.s().showContacts)
+        a.vehicleChanged(false, t0 + 100) // 상태 불명: 기어 없이 멈춘 것일 수 있어 유지
+        assertTrue(a.s().showContacts)
+        a.vehicleChanged(false, t0 + 200, moving = true)
+        assertFalse(a.s().showContacts, "확실한 주행이면 주행 중 번호를 보여 주지 않는다")
+        assertEquals(ControlStatus.HELD, a.s().trunk)
+    }
+
+    @Test
     fun `P-T15 연락처에 도로공사와 보험사 번호가 형식에 맞게 들어 있다`() {
         assertEquals("1588-2504", Hotlines.ROAD.number)
         assertTrue(Hotlines.INSURERS.isNotEmpty())

@@ -69,9 +69,14 @@ class AccidentResponse(private val config: AccidentConfig = AccidentConfig()) {
         return if (stopConfirmed) listOf(CarCommand.HAZARD_ON, CarCommand.TRUNK_OPEN) else listOf(CarCommand.HAZARD_ON)
     }
 
-    /** 차량 상태가 바뀌었을 때. 보류한 트렁크는 정차가 확인되는 순간 한 번만 요청한다. */
-    fun vehicleChanged(stopConfirmed: Boolean, nowMs: Long): List<CarCommand> {
-        val s = state ?: return emptyList()
+    /**
+     * 차량 상태가 바뀌었을 때. 보류한 트렁크는 정차가 확인되는 순간 한 번만 요청한다.
+     * [moving] 이 확실한 주행이면 사용자의 '차를 세웠어요' 확인은 끝난 것으로 보고 번호를 다시 숨긴다
+     * (상태 불명은 기어 없이 멈춘 경우일 수 있어 유지한다).
+     */
+    fun vehicleChanged(stopConfirmed: Boolean, nowMs: Long, moving: Boolean = false): List<CarCommand> {
+        val s0 = state ?: return emptyList()
+        val s = if (moving && s0.contactsRequested) s0.copy(contactsRequested = false) else s0
         if (stopConfirmed && s.trunk == ControlStatus.HELD) {
             state = s.copy(stopConfirmed = true, trunk = ControlStatus.REQUESTED, trunkRequestedAtMs = nowMs)
             return listOf(CarCommand.TRUNK_OPEN)

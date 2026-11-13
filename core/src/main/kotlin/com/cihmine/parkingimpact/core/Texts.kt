@@ -32,7 +32,18 @@ object Texts {
         val at = Instant.ofEpochMilli(occurredMs(r)).atZone(zone)
         val today = at.toLocalDate() == Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
         val clock = (if (today) "" else at.format(dayFormat) + " ") + at.format(clockFormat)
-        return "${impactPlace(r.estimate)}에 ${clock}분 쯤 충격 의심이 감지되었습니다"
+        val driving = if (r.whileDriving) "주행 중 " else ""
+        return "${impactPlace(r.estimate)}에 $driving${clock}분 쯤 충격 의심이 감지되었습니다"
+    }
+
+    /**
+     * 주행 중 작은 충격 음성. 화면을 보지 않아도 되게 짧게, 지금 세우라고 재촉하지 않는다.
+     * 추정이므로 "의심"으로 말하고, 후보가 여러 곳이면 다 읽지 않고 "차량"으로 줄인다.
+     */
+    fun drivingSpeech(r: ImpactRecord): String {
+        val e = r.estimate
+        val place = if (e.region != Region.UNKNOWN) "${e.region.label} 쪽" else "차량에"
+        return "$place 충격이 의심돼요. 주차 후 확인해 주세요."
     }
 
     /** 재탑승 음성 요약. 화면 문구와 같은 내용을 말로 읽기 좋게 말한다. */
@@ -57,10 +68,13 @@ object Texts {
         else -> "위치를 찾는 중…"
     }
 
-    /** 차가 멈춘 상태의 안내. 대피를 가장 앞세운다. */
+    /**
+     * 차가 멈춘 상태의 안내. 대피를 가장 앞세운다. 차량 응답 전이므로 "요청했어요"로 말하고(성공처럼 말하지 않음),
+     * 결과는 화면의 작동 상태와 실패 음성으로 따로 알린다. 가드레일은 고속도로 상황이라고 밝힌다.
+     */
     const val ACCIDENT_EVACUATE =
-        "비상등과 트렁크를 작동합니다. 주변이 안전하면 차에서 내려 가드레일 밖으로 대피해 주세요. 도움이 필요하면 화면의 번호로 연락해 주세요."
-    const val ACCIDENT_STOP_FIRST = "비상등을 켭니다. 안전한 곳에 차를 세워 주세요. 차가 멈추면 트렁크를 열고 연락처를 보여 드릴게요."
+        "비상등과 트렁크 작동을 요청했어요. 주변이 안전하면 차에서 내려 안전한 곳으로 대피해 주세요. 고속도로라면 가드레일 밖으로 가 주세요. 도움이 필요하면 화면의 번호로 연락해 주세요."
+    const val ACCIDENT_STOP_FIRST = "비상등 작동을 요청했어요. 안전한 곳에 차를 세워 주세요. 차가 멈추면 트렁크를 열고 연락처를 보여 드릴게요."
     const val ACCIDENT_HAZARD_FAILED = "비상등이 켜지지 않았어요. 비상등 스위치를 직접 눌러 주세요."
     const val ACCIDENT_TRUNK_FAILED = "트렁크가 열리지 않았어요. 열지 못해도 대피를 먼저 해 주세요."
     const val ACCIDENT_NOT_REAL = "이 시제품의 비상등은 모의 동작이고, 앱이 대신 전화하지 않아요. 다친 사람이 있거나 불이 나면 119, 사고 처리는 112에 직접 전화해 주세요."

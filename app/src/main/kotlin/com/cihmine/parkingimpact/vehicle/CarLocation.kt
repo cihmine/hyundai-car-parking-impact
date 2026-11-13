@@ -17,6 +17,9 @@ import com.cihmine.parkingimpact.core.CarPosition
  * 위치는 비상 대응 중([start]~[stop])에만 읽고 저장하지 않는다. 앱을 켤 때 SDK 연결을 미리 해 두어
  * 버튼을 누른 순간 바로 읽을 수 있게 한다. Pleos 서비스가 없는 기기에서는 값이 오지 않을 뿐 앱은 계속 동작한다.
  * 콜백은 SDK 스레드에서 올 수 있다.
+ *
+ * TODO(실차 내비 연동 후): 자세한 주소. 지금 SDK 의 CurrentLocationInfo 는 좌표·방향·주소 한 줄(에뮬은 구·동 수준)뿐이고
+ * 현재 도로명·고속도로 방향·거리표는 없다. 제조사 내비에서 받으면 비상 화면 주소 아래에 붙인다(docs/PLAN.md 비상 버튼 항목).
  */
 class CarLocationSource(
     context: Context,
