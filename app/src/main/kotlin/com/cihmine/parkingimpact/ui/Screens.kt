@@ -128,7 +128,7 @@ private fun Home(ui: ParkingUi, c: ParkingController) {
         width = 360.dp,
     )
     Column(Modifier.weight(1f).padding(bottom = EmergencyButtonClearance), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("주차 충격 확인", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text("충격비상 어플", fontSize = 34.sp, fontWeight = FontWeight.Bold)
         Text("주차 후, 확인할 충격과 구역을 다음 탑승 때 알려드려요", fontSize = 20.sp, color = Color.LightGray)
         val status = when {
             session == null -> "주차 기록 중 아님"

@@ -1,4 +1,4 @@
-# 주차 충격 확인 (가칭)
+# 충격비상 어플
 
 주차 중 생긴 충격 의심 이벤트를 시간·대략적인 구역과 함께 기록하고, 다시 탔을 때 확인할 일을 알려 주는 앱입니다. 사고나 고장이 나면 버튼 하나로 2차 사고 예방 동작(비상등·트렁크·대피 안내)을 시작하고, 차가 멈추면 도움을 요청할 번호를 보여 줍니다. Pleos Connect용으로 개발합니다.
 
@@ -85,13 +85,17 @@ demo/scenarios/  가상 센서 이벤트 JSON 9개(앱에도 그대로 들어감
 ./gradlew :app:assembleRelease  # 서명 키(~/.android-keys/carvoicegame.properties)가 있으면 서명된 APK
 ```
 
-테스트 환경: Pleos Connect v2.1.0 에뮬레이터(API 34, Automotive). 단위 테스트 22개.
+테스트 환경: Pleos Connect v2.1.0 에뮬레이터(API 34, Automotive, 화면 2560×1440). 단위 테스트 50개 통과.
 
 기록은 기기 안에만 저장되며 앱을 지우거나 데이터를 초기화하면 사라집니다. 위치·VIN·사진은 저장하지 않습니다.
 
 ## APK
 
-릴리스 APK는 팀명·앱 이름이 정해지면 `apk/` 폴더에 공식 파일명으로 둡니다.
+[`apk/최태현_충격비상어플_release.apk`](apk/최태현_충격비상어플_release.apk) — release 서명 APK(버전 0.1.0, 약 40MB). Pleos Connect v2.1.0 에뮬레이터(2560×1440)에 설치해 실행을 확인했습니다.
+
+```
+adb install -r --user 10 apk/최태현_충격비상어플_release.apk   # 확인한 명령(에뮬레이터 차량 사용자 10)
+```
 
 ## 문서
 
